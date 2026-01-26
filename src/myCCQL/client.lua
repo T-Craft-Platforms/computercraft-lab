@@ -1,5 +1,10 @@
 local Database = require "database"
 
+local function print_header()
+    print("myCCQL Terminal Client")
+    print("Type 'help' for commands")
+end
+
 local function print_help()
     print([[
 Commands:
@@ -10,7 +15,9 @@ Commands:
   switch <name>               Switch active DB
   list                        List all loaded DBs (* = active)
   query <sql>                 Execute SQL/CCQL statement on active DB
+  queryg <sql>                Execute SQL/CCQL and show results in GUI table
   exit                        Quit client
+  clear                       Clear the screen
   help                        Show this help
 ]])
 end
@@ -34,18 +41,114 @@ local databases = {}
 local current_db_name = "default"
 databases[current_db_name] = Database.new()
 
-print("myCCQL Terminal Client")
-print("Type 'help' for commands")
+local command_history = {}
+
+print_header()
 
 while true do
     io.write("> ")
-    local line = io.read("*l")
+
+    -- Read line with history support
+    local line
+    if term then
+        -- ComputerCraft environment with term API
+        local input = ""
+        local cursor_pos = 0
+        local temp_history_index = #command_history + 1
+
+        term.setCursorBlink(true)
+        while true do
+            local event, param = os.pullEvent()
+            if event == "char" then
+                input = input:sub(1, cursor_pos) .. param .. input:sub(cursor_pos + 1)
+                cursor_pos = cursor_pos + 1
+                local x, y = term.getCursorPos()
+                term.write(param .. input:sub(cursor_pos + 1))
+                term.setCursorPos(x + 1, y)
+            elseif event == "key" then
+                if param == keys.enter then
+                    print("")
+                    break
+                elseif param == keys.backspace then
+                    if cursor_pos > 0 then
+                        input = input:sub(1, cursor_pos - 1) .. input:sub(cursor_pos + 1)
+                        cursor_pos = cursor_pos - 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(x - 1, y)
+                        term.write(input:sub(cursor_pos + 1) .. " ")
+                        term.setCursorPos(x - 1, y)
+                    end
+                elseif param == keys.left then
+                    if cursor_pos > 0 then
+                        cursor_pos = cursor_pos - 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(x - 1, y)
+                    end
+                elseif param == keys.right then
+                    if cursor_pos < #input then
+                        cursor_pos = cursor_pos + 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(x + 1, y)
+                    end
+                elseif param == keys.up then
+                    if temp_history_index > 1 then
+                        temp_history_index = temp_history_index - 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(1, y)
+                        term.clearLine()
+                        term.write("> ")
+                        input = command_history[temp_history_index]
+                        cursor_pos = #input
+                        term.write(input)
+                    end
+                elseif param == keys.down then
+                    if temp_history_index < #command_history then
+                        temp_history_index = temp_history_index + 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(1, y)
+                        term.clearLine()
+                        term.write("> ")
+                        input = command_history[temp_history_index]
+                        cursor_pos = #input
+                        term.write(input)
+                    elseif temp_history_index == #command_history then
+                        temp_history_index = temp_history_index + 1
+                        local x, y = term.getCursorPos()
+                        term.setCursorPos(1, y)
+                        term.clearLine()
+                        term.write("> ")
+                        input = ""
+                        cursor_pos = 0
+                    end
+                end
+            end
+        end
+        term.setCursorBlink(false)
+        line = input
+    else
+        -- Standard Lua environment
+        line = io.read("*l")
+    end
+
     if not line then break end
+
+    -- Add non-empty commands to history (skip consecutive duplicates)
+    if line:match("%S") then
+        if #command_history == 0 or command_history[#command_history] ~= line then
+            table.insert(command_history, line)
+        end
+    end
+
     local cmd, rest = line:match("^(%S+)%s*(.*)$")
     if not cmd then goto continue end
 
     if cmd == "help" then
         print_help()
+
+    elseif cmd == "clear" then
+        term.clear()
+        term.setCursorPos(1,1)
+        print_header()
 
     elseif cmd == "exit" then
         print("Exiting...")
@@ -74,15 +177,31 @@ while true do
                 if databases[name] then
                     print("Database with name '"..name.."' already exists")
                 else
-                    local db = Database.new()
-                    local ok, err = pcall(function() db:load(path) end)
-                    if ok then
-                        databases[name] = db
-                        current_db_name = name
-                        print("Database '"..name.."' loaded from " .. path)
-                        print("Switched to DB '"..name.."'")
+                    -- Check if file exists
+                    local file_exists = false
+                    if fs and fs.exists then
+                        file_exists = fs.exists(path)
                     else
-                        print("Error: " .. err)
+                        local f = io.open(path, "r")
+                        if f then
+                            f:close()
+                            file_exists = true
+                        end
+                    end
+                    
+                    if not file_exists then
+                        print("Error: File '"..path.."' does not exist")
+                    else
+                        local db = Database.new()
+                        local ok, err = pcall(function() db:load(path) end)
+                        if ok then
+                            databases[name] = db
+                            current_db_name = name
+                            print("Database '"..name.."' loaded from " .. path)
+                            print("Switched to DB '"..name.."'")
+                        else
+                            print("Error: " .. err)
+                        end
                     end
                 end
             end
