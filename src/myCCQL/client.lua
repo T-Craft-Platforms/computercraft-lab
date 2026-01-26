@@ -1,5 +1,34 @@
 local Database = require "database"
 
+-- Get current working directory
+local working_dir
+if shell and shell.dir then
+    working_dir = shell.dir()
+elseif fs and fs.getDir then
+    working_dir = fs.getDir(shell.getRunningProgram())
+else
+    working_dir = "."
+end
+
+-- Resolve path relative to working directory
+local function resolve_path(path)
+    -- If absolute path, return as-is
+    if path:match("^/") or path:match("^%a:") then
+        return path
+    end
+    
+    -- Resolve relative path
+    if fs and fs.combine then
+        return fs.combine(working_dir, path)
+    else
+        -- Standard path combination
+        if working_dir == "." or working_dir == "" then
+            return path
+        end
+        return working_dir .. "/" .. path
+    end
+end
+
 local function print_header()
     print("myCCQL Terminal Client")
     print("Type 'help' for commands")
@@ -173,6 +202,7 @@ while true do
                 end
             else
                 local path = rest:gsub("^file:", "")
+                path = resolve_path(path)  -- Resolve relative to working directory
                 name = path:match("([^/\\]+)%.%w+$") or path
                 if databases[name] then
                     print("Database with name '"..name.."' already exists")
@@ -214,6 +244,7 @@ while true do
         elseif not databases[dbname] then
             print("Database '"..dbname.."' not loaded")
         else
+            path = resolve_path(path)  -- Resolve relative to working directory
             local ok, err = pcall(function() databases[dbname]:save(path) end)
             if ok then
                 print("Database '"..dbname.."' saved to " .. path)
