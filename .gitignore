@@ -1,1 +1,3 @@
 config/**
+lib/**
+.vscode/settings.json
