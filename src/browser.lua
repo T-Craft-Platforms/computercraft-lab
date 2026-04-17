@@ -1,8 +1,10 @@
 local target = "/src/browser/main.lua"
+local args = { ... }
 
 if not fs.exists(target) then
     print("Missing file: " .. target)
     return
 end
 
-shell.run(target)
+local unpackFn = table.unpack or unpack
+shell.run(target, unpackFn(args))
