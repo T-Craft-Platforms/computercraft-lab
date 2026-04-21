@@ -1,3 +1,6 @@
 craftos-pc/**
 .vscode/settings.json
 .shakespereBot/
+src/browser/browser-state.tbl
+src/browser/prints/**
+external/**
