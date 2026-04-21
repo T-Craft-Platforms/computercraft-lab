@@ -4,3 +4,4 @@ craftos-pc/**
 src/browser/browser-state.tbl
 src/browser/prints/**
 external/**
+/cc-browser/
