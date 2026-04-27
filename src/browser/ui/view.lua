@@ -2,6 +2,7 @@ return function(deps)
     local state = deps.state
     local clamp = deps.clamp
     local TOP_BAR_ROWS = deps.topBarRows or 2
+    local effectiveTopBarRows = deps.effectiveTopBarRows or function() return TOP_BAR_ROWS end
     local activeTab = deps.activeTab
     local isFavoriteUrl = deps.isFavoriteUrl or function()
         return false
@@ -18,6 +19,29 @@ return function(deps)
 
     local function layoutUi()
         local w, _ = term.getSize()
+
+        -- In fullscreen mode, only the floating menu button is visible
+        if state.fullscreen then
+            local menuBtnWidth = 3
+            -- Position off-screen elements consistently with x1 > x2 invalid but y = 0
+            local offscreen = { x1 = 0, x2 = 0, y = 0 }
+            state.ui.closeBrowser = offscreen
+            state.ui.back = offscreen
+            state.ui.forward = offscreen
+            state.ui.reload = offscreen
+            state.ui.newTab = offscreen
+            state.ui.url = offscreen
+            state.ui.tabs = {}
+            state.ui.tabClose = {}
+            if state.seamlessAppletFullscreen then
+                state.ui.menuButton = offscreen
+            else
+                -- Floating menu button at top-right corner
+                state.ui.menuButton = { x1 = math.max(1, w - menuBtnWidth + 1), x2 = w, y = 1 }
+            end
+            return
+        end
+
         state.ui.closeBrowser = { x1 = 1, x2 = 1, y = 1 }
         state.ui.back = { x1 = 1, x2 = 3, y = 2 }
         state.ui.forward = { x1 = 5, x2 = 7, y = 2 }
@@ -231,6 +255,28 @@ return function(deps)
         layoutUi()
         local w, _ = term.getSize()
         local tab = activeTab()
+
+        -- In fullscreen mode, skip the full top bar. Only draw a floating "=" button.
+        if state.fullscreen then
+            state.tabTitleCarousel = nil
+            if state.seamlessAppletFullscreen then
+                term.setCursorBlink(false)
+                return
+            end
+            -- Draw the floating "=" menu button
+            local menuWidth = state.ui.menuButton.x2 - state.ui.menuButton.x1 + 1
+            if menuWidth > 0 then
+                local menuActive = state.menuOpen == true
+                local menuBg = menuActive and colors.white or colors.gray
+                local menuFg = menuActive and colors.black or colors.lightGray
+                writeClipped(state.ui.menuButton.x1, 1, string.rep(" ", menuWidth), menuFg, menuBg)
+                local menuX = state.ui.menuButton.x1 + math.floor((menuWidth - 1) / 2)
+                writeClipped(menuX, 1, "=", menuFg, menuBg)
+            end
+            term.setCursorBlink(false)
+            return
+        end
+
         if not state.expandedTabIndex then
             state.tabTitleCarousel = nil
         end
@@ -453,9 +499,12 @@ return function(deps)
         local w, h = term.getSize()
         local tab = activeTab()
         local firstLine = tab.scroll + 1
-        local visibleHeight = math.max(1, h - TOP_BAR_ROWS)
+        local topRows = effectiveTopBarRows()
+        local visibleHeight = math.max(1, h - topRows)
         local selection = state.caretMode and normalizedPageSelection(tab) or nil
         local viewportWidth = clamp(tab.viewportWidth or w, 1, w)
+        local defaultBg = tab.pageDefaultBackground or colors.black
+        local defaultFg = tab.pageDefaultForeground or colors.white
         local scrollbar = verticalScrollbarGeometry(tab, visibleHeight)
 
         for row = 1, visibleHeight do
@@ -466,12 +515,12 @@ return function(deps)
             local bgs = {}
             for x = 1, viewportWidth do
                 local ch = " "
-                local fg = colors.white
-                local bg = colors.black
+                local fg = defaultFg
+                local bg = defaultBg
                 if line then
                     ch = line.chars[x] or " "
-                    fg = line.fg[x] or colors.white
-                    bg = line.bg[x] or colors.black
+                    fg = line.fg[x] or defaultFg
+                    bg = line.bg[x] or defaultBg
                 end
                 if selection and pageSelectionContains(selection, lineIndex, x) then
                     fg = colors.white
@@ -483,35 +532,43 @@ return function(deps)
             end
             for x = viewportWidth + 1, w do
                 chars[x] = " "
-                fgs[x] = colors.toBlit(colors.white)
-                bgs[x] = colors.toBlit(colors.black)
+                fgs[x] = colors.toBlit(defaultFg)
+                bgs[x] = colors.toBlit(defaultBg)
             end
             if scrollbar and w >= 1 then
                 local inThumb = row >= scrollbar.thumbTop and row < (scrollbar.thumbTop + scrollbar.thumbHeight)
                 chars[w] = " "
-                fgs[w] = colors.toBlit(colors.white)
+                fgs[w] = colors.toBlit(defaultFg)
                 bgs[w] = colors.toBlit(inThumb and colors.lightGray or colors.gray)
             end
-            term.setCursorPos(1, row + TOP_BAR_ROWS)
+            term.setCursorPos(1, row + topRows)
             term.blit(table.concat(chars), table.concat(fgs), table.concat(bgs))
         end
 
         local currentUrl = tostring(tab.currentUrl or ""):lower()
         local statusText = tostring(tab.settingsStickyStatus or "")
         if statusText ~= "" and currentUrl:sub(1, #"about:settings") == "about:settings" then
+            local statusRight = clamp(viewportWidth, 1, w)
             local badge = " " .. statusText .. " "
-            local maxBadgeWidth = math.max(12, math.floor(w * 0.55))
+            local maxBadgeWidth = math.max(12, math.floor(statusRight * 0.55))
             if #badge > maxBadgeWidth then
                 local inner = math.max(1, maxBadgeWidth - 5)
                 badge = " " .. statusText:sub(1, inner) .. "... "
             end
-            local x = math.max(1, w - #badge + 1)
-            writeClipped(x, TOP_BAR_ROWS + 1, badge, colors.black, colors.lime)
+            if #badge > statusRight then
+                badge = badge:sub(1, statusRight)
+            end
+            local x = math.max(1, statusRight - #badge + 1)
+            writeClipped(x, topRows + 1, badge, colors.black, colors.lime)
         end
     end
 
     local function drawMenuPopover()
         state.ui.menu = nil
+        if state.seamlessAppletFullscreen then
+            state.menuOpen = false
+            return
+        end
         if not state.menuOpen then
             return
         end
@@ -521,11 +578,15 @@ return function(deps)
             state.menuOpen = false
             return
         end
+        local topRows = effectiveTopBarRows()
         local panelWidth = math.min(24, math.max(14, w))
-        local panelHeight = 6
+        local panelHeight = 8
         local panelX2 = clamp(state.ui.menuButton.x2, 1, w)
         local panelX1 = math.max(1, panelX2 - panelWidth + 1)
-        local panelY1 = TOP_BAR_ROWS + 1
+        local panelY1 = topRows + 1
+        if state.fullscreen then
+            panelY1 = state.ui.menuButton.y + 1
+        end
         local panelY2 = math.min(h, panelY1 + panelHeight - 1)
 
         state.ui.menu = {
@@ -544,8 +605,10 @@ return function(deps)
         local helpY = math.min(panelY2, panelY1 + 1)
         local favoritesY = math.min(panelY2, panelY1 + 2)
         local historyY = math.min(panelY2, panelY1 + 3)
-        local printY = math.min(panelY2, panelY1 + 4)
-        local exitY = math.min(panelY2, panelY1 + 5)
+        local downloadY = math.min(panelY2, panelY1 + 4)
+        local printY = math.min(panelY2, panelY1 + 5)
+        local fullscreenY = math.min(panelY2, panelY1 + 6)
+        local exitY = math.min(panelY2, panelY1 + 7)
 
         writeClipped(innerX1, settingsY, "Settings", textFg, textBg)
         writeClipped(innerX1, helpY, "Help", textFg, textBg)
@@ -570,7 +633,10 @@ return function(deps)
         writeClipped(favTextX1, favoritesY, string.rep(" ", favTextX2 - favTextX1 + 1), textFg, textBg)
         writeClipped(favTextX1 + 1, favoritesY, "Favorites", textFg, textBg)
         writeClipped(innerX1, historyY, "History", textFg, textBg)
+        writeClipped(innerX1, downloadY, "Download", textFg, textBg)
         writeClipped(innerX1, printY, "Print", textFg, textBg)
+        local fullscreenLabel = state.fullscreen and "Exit Fullscreen" or "Fullscreen"
+        writeClipped(innerX1, fullscreenY, fullscreenLabel, textFg, textBg)
         writeClipped(innerX1, exitY, "Exit", textFg, textBg)
 
         state.ui.menu.settings = { x1 = panelX1, x2 = panelX2, y = settingsY }
@@ -583,7 +649,9 @@ return function(deps)
         state.ui.menu.addFavoriteEnabled = addFavoriteEnabled
         state.ui.menu.favorites = { x1 = panelX1, x2 = favTextX2, y = favoritesY }
         state.ui.menu.history = { x1 = panelX1, x2 = panelX2, y = historyY }
+        state.ui.menu.download = { x1 = panelX1, x2 = panelX2, y = downloadY }
         state.ui.menu.print = { x1 = panelX1, x2 = panelX2, y = printY }
+        state.ui.menu.fullscreen = { x1 = panelX1, x2 = panelX2, y = fullscreenY }
         state.ui.menu.exit = { x1 = panelX1, x2 = panelX2, y = exitY }
     end
 
