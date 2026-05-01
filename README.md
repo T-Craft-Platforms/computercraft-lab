@@ -1,2 +1,2 @@
 # ComputerCraftLab
-Computercraft Programs written in Lua
+ComputerCraft programs written in Lua

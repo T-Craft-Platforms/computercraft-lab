@@ -1,0 +1,1 @@
+The CC-Browser project has been moved to a separate repository. You can find it at [T-Craft-Platforms/computercraft-browser](https://github.com/T-Craft-Platforms/computercraft-browser).
